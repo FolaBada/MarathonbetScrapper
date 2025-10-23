@@ -1,0 +1,8 @@
+﻿bin/
+obj/
+**/.playwright/
+.vs/
+.vscode/
+*.exe
+*.pdb
+Thumbs.db
