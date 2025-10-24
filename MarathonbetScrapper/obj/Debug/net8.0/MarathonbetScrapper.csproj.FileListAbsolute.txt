@@ -363,3 +363,4 @@ C:\Users\User2\Desktop\MarathonbetScrapper\MarathonbetScrapper\obj\Debug\net8.0\
 C:\Users\User2\Desktop\MarathonbetScrapper\MarathonbetScrapper\bin\Debug\net8.0\Microsoft.Extensions.DependencyInjection.Abstractions.dll
 C:\Users\User2\Desktop\MarathonbetScrapper\MarathonbetScrapper\bin\Debug\net8.0\Microsoft.Extensions.Logging.Abstractions.dll
 C:\Users\User2\Desktop\MarathonbetScrapper\MarathonbetScrapper\bin\Debug\net8.0\MySqlConnector.dll
+C:\Users\User2\Desktop\MarathonbetScrapper\MarathonbetScrapper\obj\Debug\net8.0\MarathonbetScrapper.sourcelink.json

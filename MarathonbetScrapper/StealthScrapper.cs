@@ -236,6 +236,162 @@ namespace MarathonbetScrapper
             }
         }
 
+public static async Task RunSinglePageAsync(IPage page, string startSport, bool allowDirectFallback = false)
+{
+    // 1) Landing
+    Console.WriteLine("Navigating to Marathonbet (single-page run)...");
+    page.SetDefaultNavigationTimeout(90_000);
+
+    await page.GotoAsync("https://www.marathonbet.it/scommesse",
+        new() { WaitUntil = WaitUntilState.Load, Timeout = 90_000 });
+
+    await HandleRandomPopup(page);
+    await EnsureAllSportsVisibleAsync(page);
+
+    // 2) Read visible sports and filter to requested one
+    var sports = await GetAllowedSports(page);
+
+    if (!string.IsNullOrWhiteSpace(startSport))
+    {
+        var wanted = CanonicalFromTextOrHref(startSport, null);
+        if (wanted != null)
+        {
+            sports = sports.Where(s => s.Equals(wanted, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+        else
+        {
+            sports = new List<string>(); // force fallback if allowed
+        }
+    }
+
+    // 3) Optional direct URL fallback when the sport isn’t visible in the sidebar
+    if (sports.Count == 0 && allowDirectFallback && !string.IsNullOrWhiteSpace(startSport))
+    {
+        var s = Canon(startSport);
+        string? url = s switch
+        {
+            var x when CalcioSyn.Contains(x)            => "https://www.marathonbet.it/scommesse/calcio",
+            var x when BasketSyn.Contains(x)            => "https://www.marathonbet.it/scommesse/pallacanestro",
+            var x when TennisSyn.Contains(x)            => "https://www.marathonbet.it/scommesse/tennis",
+            var x when RugbySyn.Contains(x)             => "https://www.marathonbet.it/scommesse/rugby",
+            var x when AmericanFootballSyn.Contains(x)  => "https://www.marathonbet.it/scommesse/football-americano",
+            var x when BaseballSyn.Contains(x)          => "https://www.marathonbet.it/scommesse/baseball",
+            var x when IceHockeySyn.Contains(x)         => "https://www.marathonbet.it/scommesse/hockey-su-ghiaccio",
+            _ => null
+        };
+
+        if (url != null)
+        {
+            Console.WriteLine($"[Fallback] Navigating directly to: {url}");
+            await page.GotoAsync(url, new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 90_000 });
+            await HandleRandomPopup(page);
+
+            // normalize to one canonical sport name so downstream code works
+            var canonical = url.Contains("/calcio") ? "Calcio" :
+                            url.Contains("/pallacanestro") ? "Pallacanestro" :
+                            url.Contains("/tennis") ? "Tennis" :
+                            url.Contains("/rugby") ? "Rugby" :
+                            (url.Contains("/football-americano") || url.Contains("/american-football")) ? "Football Americano" :
+                            url.Contains("/baseball") ? "Baseball" :
+                            (url.Contains("/hockey-su-ghiaccio") || url.Contains("/ice-hockey") || url.Contains("/hockey")) ? "Hockey su ghiaccio" :
+                            null;
+
+            if (canonical != null) sports = new List<string> { canonical };
+        }
+    }
+
+    if (sports.Count == 0)
+    {
+        Console.WriteLine($"No visible/fallback sport matched '{startSport}'. Stopping single-page run.");
+        return;
+    }
+
+    Console.WriteLine($"[SinglePage] Sports to process: {string.Join(", ", sports)}");
+
+    // 4) Scrape each requested sport using the SAME page
+    foreach (var sport in sports)
+    {
+        Console.WriteLine($"\n=== Processing sport: {sport} ===");
+
+        // Go to sport by visible click if possible (safer than direct URL)
+        await ClickSportSection(page, sport);
+        await HandleRandomPopup(page);
+
+        var leagues = await GetLeaguesForSport(page);
+
+        foreach (var league in leagues)
+        {
+            Console.WriteLine($"\n--- Processing league: {league} ---");
+
+            await HandleRandomPopup(page);
+            await ClickLeagueAndLoadOdds(page, league, pauseAfterLoad: true);
+            await HandleRandomPopup(page);
+
+            var safeSport  = MakeSafeFilePart(sport);
+            var safeLeague = MakeSafeFilePart(league).Replace(" ", "_");
+            var fileName   = $"{safeSport}_{safeLeague}.json";
+
+            // Defer POST/save for these sports until after enrichment
+            bool isAF = sport.Equals("Football Americano", StringComparison.OrdinalIgnoreCase);
+            bool isBB = sport.Equals("Baseball", StringComparison.OrdinalIgnoreCase);
+            bool isHK = sport.Equals("Hockey su ghiaccio", StringComparison.OrdinalIgnoreCase);
+
+            // 5) Extract base odds
+            var matches = await ExtractOddsAsync(page, fileName, deferPostAndSave: isAF || isBB || isHK);
+
+            // 6) Optional enrichment by sport
+            if (isAF || isBB || isHK)
+            {
+                try
+                {
+                    if (isAF)
+                    {
+                        await EnrichAmericanFootballHandicapAsync(page, matches);
+                        try { await EnrichAmericanFootballOUAsync(page, matches); } catch (Exception ex) { Console.WriteLine("[AF/O-U] " + ex.Message); }
+                    }
+                    else if (isBB)
+                    {
+                        await EnrichBaseballHandicapAsync(page, matches);
+                        await EnrichBaseballOUAsync(page, matches);
+                    }
+                    else // Hockey
+                    {
+                        await EnrichIceHockeyOUAsync(page, matches);
+                        await EnrichIceHockeyHandicapAsync(page, matches);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Enrichment error] {sport}: {ex.Message}");
+                }
+
+                // 7) Transform + POST + export JSON (only for deferred sports)
+                await TransformAndExportAsync(fileName, matches, sport, league);
+            }
+
+            // 8) Save to DB (all sports)
+            try
+            {
+                await DbSaver.SaveOddsAsync("marathonbet", sport, league, matches);
+                Console.WriteLine($"Inserted {matches.Count} matches into DB.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("DB save failed: " + ex.Message);
+            }
+
+            // 9) Reset back to sport landing for the next league (same page)
+            await page.GotoAsync("https://www.marathonbet.it/scommesse",
+                new() { WaitUntil = WaitUntilState.NetworkIdle, Timeout = 90_000 });
+
+            await HandleRandomPopup(page);
+            await EnsureAllSportsVisibleAsync(page);
+            await ClickSportSection(page, sport);
+            await HandleRandomPopup(page);
+        }
+    }
+}
+
         const string ConnStr =
             "Server=mysql.aruba.it;Port=3306;Database=Sql1764243_4;User ID=Sql1764243;Password=Isolatof10!;SslMode=None;";
 
@@ -455,7 +611,7 @@ VALUES
                  isBasket ? "basket" :
                  isTennis ? "tennis" :
                  isRugby ? "rugby" :
-                 isIceHockey ? "ice-hockey" : "other";
+                 isIceHockey ? "hockey" : "other";
 
                 return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
                 {
@@ -925,7 +1081,7 @@ VALUES
                  isBasket ? "basket" :
                  isTennis ? "tennis" :
                  isRugby ? "rugby" :
-                 isIceHockey ? "ice-hockey" : "other";
+                 isIceHockey ? "hockey" : "other";
 
                 return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
                 {
@@ -3142,59 +3298,144 @@ VALUES
             }
         }
 
-        private static async Task HandleRandomPopup(IPage page)
+       private static async Task HandleRandomPopup(IPage page)
+{
+    // 1) quick win: try ESC
+    try { await page.Keyboard.PressAsync("Escape"); } catch { }
+
+    // 2) common consent managers (OneTrust, Quantcast, etc.)
+    try
+    {
+        var known = new[]
+        {
+            "#onetrust-reject-all-handler", "#onetrust-accept-btn-handler",
+            "#qc-cmp2-reject-all", "#qc-cmp2-accept-all",
+            "button[aria-label='Close']", ".ot-close-icon", ".ot-pc-close",
+            "button[mode='deny']", "button[mode='accept']"
+        };
+        foreach (var sel in known)
+        {
+            var b = page.Locator(sel).First;
+            if (await b.IsVisibleAsync(new() { Timeout = 400 }))
+            {
+                await b.ClickAsync(new() { Force = true });
+                await page.WaitForTimeoutAsync(200);
+            }
+        }
+    }
+    catch { }
+
+    // 3) robust text-based clicks (Italian/English variants)
+    async Task ClickByTextAsync(ILocator scope)
+    {
+        string[] labels =
+        {
+            "Non ora", "Non adesso", "No grazie",
+            "Rifiuta", "Rifiuta tutto",
+            "Continua senza accettare", "Continua senza accettare tutto",
+            "Chiudi", "Chiudi finestra",
+            "Dismiss", "Close", "Not now",
+            "Reject", "Reject all",
+            "Accept", "Accept all"
+        };
+
+        foreach (var txt in labels)
         {
             try
             {
-                for (int retry = 0; retry < 5; retry++)
+                var btn = scope.GetByRole(AriaRole.Button, new() { Name = txt, Exact = false });
+                if (await btn.IsVisibleAsync(new() { Timeout = 300 }))
                 {
-                    var overlay = page.Locator(".kumulos-background-mask").First;
-                    var prompt = page.Locator(".kumulos-prompt").First;
-
-                    bool isVisible = false;
-                    try { isVisible = await overlay.IsVisibleAsync(new() { Timeout = 500 }); } catch { }
-                    if (!isVisible)
-                    {
-                        try { isVisible = await prompt.IsVisibleAsync(new() { Timeout = 500 }); } catch { }
-                    }
-
-                    if (!isVisible)
-                        return;
-
-                    Console.WriteLine("Popup detected. Attempting to dismiss...");
-
-                    var dismissButton = page.GetByText("Non ora");
-                    if (await dismissButton.IsVisibleAsync(new() { Timeout = 500 }))
-                    {
-                        await dismissButton.ClickAsync(new() { Force = true });
-                        Console.WriteLine("Clicked 'Non ora' dismiss button.");
-                    }
-                    else
-                    {
-                        var promptButton = prompt.Locator("button").First;
-                        if (await promptButton.IsVisibleAsync(new() { Timeout = 500 }))
-                        {
-                            await promptButton.ClickAsync(new() { Force = true });
-                            Console.WriteLine("Clicked popup button.");
-                        }
-                        else
-                        {
-                            Console.WriteLine("No dismiss button found. Clicking overlay...");
-                            await overlay.ClickAsync(new() { Force = true });
-                        }
-                    }
-
-                    try { await overlay.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3000 }); } catch { }
-                    try { await prompt.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3000 }); } catch { }
-
-                    await page.WaitForTimeoutAsync(500);
+                    await btn.ClickAsync(new() { Force = true });
+                    await page.WaitForTimeoutAsync(150);
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Popup handler error: {ex.Message}");
-            }
+            catch { }
         }
+
+        // generic fallbacks
+        var guesses = new[]
+        {
+            "button:has-text('Non')",
+            "button:has-text('Rifiuta')",
+            "button:has-text('Chiudi')",
+            "button:has-text('Close')",
+            "button:has-text('Reject')",
+            ".kumulos-prompt button",
+            ".modal.show .btn, .modal.show button"
+        };
+
+        foreach (var sel in guesses)
+        {
+            try
+            {
+                var b = scope.Locator(sel).First;
+                if (await b.IsVisibleAsync(new() { Timeout = 300 }))
+                {
+                    await b.ClickAsync(new() { Force = true });
+                    await page.WaitForTimeoutAsync(150);
+                }
+            }
+            catch { }
+        }
+    }
+
+    // 4) main page
+await ClickByTextAsync(page.Locator("body"));
+
+    // 5) iframes (some sports load a consent/prompt in an iframe)
+    try
+    {
+        foreach (var f in page.Frames)
+        {
+            if (f == page.MainFrame) continue;
+            try { await ClickByTextAsync(f.Locator("body")); } catch { }
+        }
+    }
+    catch { }
+
+    // 6) overlays specific to that Kumulos prompt you already saw
+    try
+    {
+        var overlay = page.Locator(".kumulos-background-mask, .mfp-bg, .modal-backdrop").First;
+        if (await overlay.IsVisibleAsync(new() { Timeout = 400 }))
+        {
+            try { await overlay.ClickAsync(new() { Force = true }); } catch { }
+        }
+
+        var prompt = page.Locator(".kumulos-prompt").First;
+        if (await prompt.IsVisibleAsync(new() { Timeout = 400 }))
+        {
+            var anyBtn = prompt.Locator("button").First;
+            if (await anyBtn.IsVisibleAsync(new() { Timeout = 300 }))
+                await anyBtn.ClickAsync(new() { Force = true });
+        }
+    }
+    catch { }
+
+    // 7) last-resort nuke (safe selectors only; avoids breaking page content)
+    try
+    {
+        await page.EvaluateAsync(@"
+(() => {
+  const kill = sel => document.querySelectorAll(sel).forEach(el => { el.remove(); });
+  // benign overlays/dialog shells
+  kill('.kumulos-background-mask');
+  kill('.kumulos-prompt');
+  kill('#onetrust-consent-sdk');
+  kill('.ot-sdk-container');
+  kill('.qc-cmp2-container');
+  // generic blocking overlays
+  document.querySelectorAll('[role=dialog], .modal.show, .iziToast-overlay')
+    .forEach(el => { if (el.getBoundingClientRect().height > 80) el.style.display='none'; });
+})();
+");
+    }
+    catch { }
+
+    // small breath after cleanup
+    await page.WaitForTimeoutAsync(120);
+}
 
         // =========================
         // Keep a target element reliably in view (USED ONLY FOR AF/BB enrichment)

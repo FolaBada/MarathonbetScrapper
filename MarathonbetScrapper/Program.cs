@@ -1,21 +1,86 @@
 ﻿// Program.cs
+using System;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Playwright;
 
 namespace MarathonbetScrapper
 {
     internal static class Program
     {
+        // Default order; you can override via: dotnet run -- "Calcio,Tennis,ice-hockey"
+        private static readonly string[] DefaultSports = new[]
+        {
+            "american-football", "ice-hockey", "baseball", "Tennis", "Calcio", "Pallacanestro", "rugby"
+        };
+
         public static async Task Main(string[] args)
         {
-            // Start with Basketball, then Calcio & Tennis (depending on availability)
-            //  await MarathonbetScraper.RunAsync("Pallacanestro");
-            //   await MarathonbetScraper.RunAsync("rugby");
-            // await MarathonbetScraper.RunAsync("american-football");
-            await MarathonbetScraper.RunAsync("baseball");
-            // await MarathonbetScraper.RunAsync("ice-hockey");
-            //  await MarathonbetScraper.RunAsync("Tennis");
-            //  await MarathonbetScraper.RunAsync("Calcio");
-            // await MarathonbetScraper.RunAsync(); // default order Calcio → Basket → Tennis
+            // Resolve sports list (comma-separated arg) or use defaults
+            var sports = (args?.Length > 0 && !string.IsNullOrWhiteSpace(args[0]))
+                ? args[0].Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                : DefaultSports;
+
+            Console.WriteLine("[Startup] Sports queue: " + string.Join(", ", sports));
+            Console.WriteLine("Press Ctrl+C to stop.\n");
+
+            using var cts = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;           // don't kill the process immediately
+                cts.Cancel();              // signal graceful shutdown
+                Console.WriteLine("\n[Shutdown] Ctrl+C received. Finishing current step…");
+            };
+
+            using var playwright = await Playwright.CreateAsync();
+            var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = false,  // set true if you want it hidden
+                SlowMo = 0,
+                Devtools = false
+            });
+
+            try
+            {
+                while (!cts.IsCancellationRequested)
+                {
+                    foreach (var sport in sports)
+                    {
+                        if (cts.IsCancellationRequested) break;
+
+                        Console.WriteLine($"\n==== [{DateTime.Now:HH:mm:ss}] START {sport} ====");
+
+                        await using var context = await browser.NewContextAsync();
+                        var page = await context.NewPageAsync();
+
+                        try
+                        {
+                            // IMPORTANT: this method should NOT launch/close the browser,
+                            // it should just use the provided page.
+                            await MarathonbetScraper.RunSinglePageAsync(page, sport, allowDirectFallback: true);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[ERROR] while scraping {sport}: {ex.Message}");
+                        }
+                        finally
+                        {
+                            await context.CloseAsync();
+                        }
+
+                        Console.WriteLine($"==== [{DateTime.Now:HH:mm:ss}] END {sport} ====\n");
+                    }
+
+                    // Optional small pause between full cycles (uncomment if you want one)
+                    // await Task.Delay(TimeSpan.FromSeconds(10), cts.Token);
+                }
+            }
+            finally
+            {
+                await browser.CloseAsync();
+                Console.WriteLine("[Shutdown] Browser closed. Bye!");
+            }
         }
     }
 }
