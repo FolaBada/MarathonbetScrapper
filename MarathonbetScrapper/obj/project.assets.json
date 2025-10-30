@@ -908,19 +908,19 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\User2\\.nuget\\packages\\": {}
+    "C:\\Users\\vinci\\.nuget\\packages\\": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\User2\\Desktop\\MarathonbetScrapper\\MarathonbetScrapper\\MarathonbetScrapper.csproj",
+      "projectUniqueName": "C:\\Development\\MarathonbetScrapper\\MarathonbetScrapper\\MarathonbetScrapper.csproj",
       "projectName": "MarathonbetScrapper",
-      "projectPath": "C:\\Users\\User2\\Desktop\\MarathonbetScrapper\\MarathonbetScrapper\\MarathonbetScrapper.csproj",
-      "packagesPath": "C:\\Users\\User2\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\User2\\Desktop\\MarathonbetScrapper\\MarathonbetScrapper\\obj\\",
+      "projectPath": "C:\\Development\\MarathonbetScrapper\\MarathonbetScrapper\\MarathonbetScrapper.csproj",
+      "packagesPath": "C:\\Users\\vinci\\.nuget\\packages\\",
+      "outputPath": "C:\\Development\\MarathonbetScrapper\\MarathonbetScrapper\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "C:\\Users\\User2\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        "C:\\Users\\vinci\\AppData\\Roaming\\NuGet\\NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net8.0"
@@ -938,11 +938,6 @@
         "warnAsError": [
           "NU1605"
         ]
-      },
-      "restoreAuditProperties": {
-        "enableAudit": "true",
-        "auditLevel": "low",
-        "auditMode": "direct"
       }
     },
     "frameworks": {
@@ -978,7 +973,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.412/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.121/PortableRuntimeIdentifierGraph.json"
       }
     }
   }

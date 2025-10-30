@@ -12,7 +12,8 @@ namespace MarathonbetScrapper
         // Default order; you can override via: dotnet run -- "Calcio,Tennis,ice-hockey"
         private static readonly string[] DefaultSports = new[]
         {
-            "american-football", "ice-hockey", "baseball", "Tennis", "Calcio", "Pallacanestro", "rugby"
+            "american-football"
+            //, "ice-hockey", "baseball", "Tennis", "Calcio", "Pallacanestro", "rugby"
         };
 
         public static async Task Main(string[] args)

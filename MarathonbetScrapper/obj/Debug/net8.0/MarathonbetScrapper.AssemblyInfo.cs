@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("MarathonbetScrapper")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6245b650cac7d9789aea851fc3fa4b5381710755")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0ffac911c279771302478bef46a60b5998c80df4")]
 [assembly: System.Reflection.AssemblyProductAttribute("MarathonbetScrapper")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MarathonbetScrapper")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
